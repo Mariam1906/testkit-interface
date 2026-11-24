@@ -9,6 +9,7 @@ export interface CommandOptions {
   fn: string;
   ramp: string;
   strict: boolean;
+  shell?: "bash" | "zsh" | "sh" | "fish";
   optionalArgOrder?: OptionalArgKey[];
 }
 
@@ -112,7 +113,29 @@ export const modules: ReadonlyArray<{
   { name: "ttl", description: "Storage lifetime and expiry simulation", category: "Storage" },
 ];
 
-const quote = (value: string) => (value.includes(" ") ? `"${value}"` : value);
+/**
+ * Quote exactly one CLI argument for the selected shell. Plain paths stay
+ * unquoted for readability, and ordinary paths with spaces retain double
+ * quotes. Single quotes prevent expansion of dollars, command substitutions,
+ * metacharacters and embedded newlines.
+ */
+export function quoteShellArg(
+  value: string,
+  shell: CommandOptions["shell"] = "bash",
+  alwaysQuote = false,
+): string {
+  if (value.includes("\0")) throw new Error("Shell arguments cannot contain NUL characters");
+  if (!alwaysQuote && /^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
+  const requiresSingleQuotes = ['"', "'", "$", String.fromCharCode(96), "\\", "\n", "\r", "!"]
+    .some((character) => value.includes(character));
+  if (!requiresSingleQuotes) return '"' + value + '"';
+  if (shell === "fish") {
+    return "'" + value.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
+  }
+  return "'" + value.replace(/'/g, "'\"'\"'") + "'";
+}
+const quote = (value: string, options: CommandOptions) =>
+  quoteShellArg(value, options.shell);
 
 const getOptionalArgOrder = (options: CommandOptions): OptionalArgKey[] => {
   if (options.command === "coverage") {
@@ -173,7 +196,7 @@ export function buildCommand(options: CommandOptions): string {
     }
     return [
       "soroban-testkit coverage",
-      options.path && quote(options.path),
+      options.path && quote(options.path, options),
       ...buildOptionalArgs(options),
     ]
       .filter(Boolean)
@@ -184,17 +207,17 @@ export function buildCommand(options: CommandOptions): string {
     return [
       "soroban-testkit limits",
       "--contract",
-      quote(options.path || fallbackValues.limitsContract),
+      quote(options.path || fallbackValues.limitsContract, options),
       "--fn",
-      options.fn || fallbackValues.limitsFunction,
+      quote(options.fn || fallbackValues.limitsFunction, options),
       "--ramp",
-      options.ramp || fallbackValues.limitsRamp,
+      quote(options.ramp || fallbackValues.limitsRamp, options),
     ].join(" ");
   }
 
   return [
     "soroban-testkit audit",
-    quote(options.path || fallbackValues.auditPath),
+    quote(options.path || fallbackValues.auditPath, options),
     ...buildOptionalArgs(options),
   ]
     .filter(Boolean)
@@ -211,7 +234,7 @@ export function formatCommandLine(
 
   if (options.command === "coverage") {
     const args: string[] = [];
-    if (options.path) args.push(quote(options.path));
+    if (options.path) args.push(quote(options.path, options));
     args.push(...buildOptionalArgs(options));
 
     if (args.length === 0) {
@@ -225,9 +248,9 @@ export function formatCommandLine(
   }
 
   if (options.command === "limits") {
-    const contractPath = quote(options.path || fallbackValues.limitsContract);
-    const fn = options.fn || fallbackValues.limitsFunction;
-    const ramp = options.ramp || fallbackValues.limitsRamp;
+    const contractPath = quote(options.path || fallbackValues.limitsContract, options);
+    const fn = quote(options.fn || fallbackValues.limitsFunction, options);
+    const ramp = quote(options.ramp || fallbackValues.limitsRamp, options);
 
     return [
       "soroban-testkit limits \\",
@@ -238,7 +261,7 @@ export function formatCommandLine(
   }
 
   // audit
-  const auditPath = quote(options.path || fallbackValues.auditPath);
+  const auditPath = quote(options.path || fallbackValues.auditPath, options);
   const auditArgs = buildOptionalArgs(options).map((arg) => `  ${arg}`);
 
   return [
@@ -249,116 +272,84 @@ export function formatCommandLine(
 }
 
 // Issue #144: Format command with explanatory comments
+// Keep comment lines *before* the shell command: inline comments after a
+// backslash continuation would turn the next argument into a new command.
 export function formatCommandWithComments(options: CommandOptions): string {
-  const comments: string[] = [];
-  
-  if (options.command === "coverage") {
-    comments.push("# Generate contract-test coverage through cargo-llvm-cov");
-    comments.push("soroban-testkit coverage \\");
-    if (options.path) {
-      comments.push(`  ${quote(options.path)} \\  # Project or contract path`);
-    }
-    const optionalArgs = buildOptionalArgs(options);
-    optionalArgs.forEach((arg, index) => {
-      const isLast = index === optionalArgs.length - 1;
-      if (arg.includes("--format")) {
-        comments.push(`  ${arg}${isLast ? "" : " \\"}  # Output format: html, lcov, or text`);
-      } else if (arg.includes("--open")) {
-        comments.push(`  ${arg}${isLast ? "" : " \\"}  # Open report in browser`);
-      } else {
-        comments.push(`  ${arg}${isLast ? "" : " \\"}`);
-      }
-    });
-    if (optionalArgs.length === 0 && options.path) {
-      comments[comments.length - 1] = comments[comments.length - 1].replace(" \\", "");
-    }
-  } else if (options.command === "limits") {
-    comments.push("# Ramp a contract input to find its practical resource ceiling");
-    const contractPath = quote(options.path || fallbackValues.limitsContract);
-    const fn = options.fn || fallbackValues.limitsFunction;
-    const ramp = options.ramp || fallbackValues.limitsRamp;
-    
-    comments.push("soroban-testkit limits \\");
-    comments.push(`  --contract ${contractPath} \\  # Path to compiled WASM artifact`);
-    comments.push(`  --fn ${fn} \\  # Function to probe for limits`);
-    comments.push(`  --ramp ${ramp}  # Parameter to increase`);
-  } else {
-    comments.push("# Scan contract sources for auth, arithmetic, and TTL risks");
-    const auditPath = quote(options.path || fallbackValues.auditPath);
-    comments.push("soroban-testkit audit \\");
-    
-    const optionalArgs = buildOptionalArgs(options);
-    if (optionalArgs.length > 0) {
-      comments.push(`  ${auditPath} \\  # Contract source directory`);
-      optionalArgs.forEach((arg, index) => {
-        const isLast = index === optionalArgs.length - 1;
-        if (arg.includes("--strict")) {
-          comments.push(`  ${arg}${isLast ? "" : " \\"}  # Fail on warnings`);
-        } else {
-          comments.push(`  ${arg}${isLast ? "" : " \\"}`);
-        }
-      });
-    } else {
-      comments.push(`  ${auditPath}  # Contract source directory`);
-    }
-  }
-  
-  return comments.join("\n");
+  const comments =
+    options.command === "coverage"
+      ? [
+          "# Generate contract-test coverage through cargo-llvm-cov",
+          "# Project or contract path",
+          "# Output format: html, lcov, or text",
+          ...(options.open ? ["# Open report in browser"] : []),
+        ]
+      : options.command === "limits"
+        ? [
+            "# Ramp a contract input to find its practical resource ceiling",
+            "# Path to compiled WASM artifact",
+            "# Function to probe for limits",
+            "# Parameter to increase",
+          ]
+        : [
+            "# Scan contract sources for auth, arithmetic, and TTL risks",
+            "# Contract source directory",
+            ...(options.strict ? ["# Fail on warnings"] : []),
+          ];
+  return [...comments, formatCommandLine(options, true)].join("\n");
 }
 
-// Issue #145: Format command as a reusable shell script
+// Issue #145: Format command as a reusable Bash script.
+// The script has a Bash shebang regardless of the interactive shell selector.
 export function formatCommandAsScript(options: CommandOptions): string {
-  const lines: string[] = [];
-  lines.push("#!/usr/bin/env bash");
-  lines.push("");
-  lines.push("# Soroban Testkit command script");
-  lines.push(`# Generated: ${new Date().toISOString()}`);
-  lines.push(`# Workflow: ${options.command}`);
-  lines.push("");
-  lines.push("set -e  # Exit on error");
-  lines.push("");
-  
+  const lines = [
+    "#!/usr/bin/env bash",
+    "",
+    "# Soroban Testkit command script",
+    `# Generated: ${new Date().toISOString()}`,
+    `# Workflow: ${options.command}`,
+    "",
+    "set -e  # Exit on error",
+    "",
+  ];
+
+  const assignment = (value: string) => quoteShellArg(value, "bash", true);
+  const addCommand = (name: string, args: string[]) => {
+    if (args.length === 0) {
+      lines.push(`soroban-testkit ${name}`);
+    } else {
+      lines.push(`soroban-testkit ${name} \\`);
+      args.forEach((arg, index) => {
+        lines.push(`  ${arg}${index < args.length - 1 ? " \\" : ""}`);
+      });
+    }
+  };
+
   if (options.command === "coverage") {
     lines.push("# Coverage workflow configuration");
-    lines.push(`PROJECT_PATH="${options.path || "."}"`);
-    lines.push(`FORMAT="${options.format}"`);
+    lines.push(`PROJECT_PATH=${assignment(options.path || ".")}`);
+    lines.push(`FORMAT=${assignment(options.format)}`);
     lines.push(`OPEN_REPORT=${options.open ? "true" : "false"}`);
     lines.push("");
     lines.push("# Generate coverage report");
-    lines.push('soroban-testkit coverage \\');
-    lines.push('  "$PROJECT_PATH" \\');
-    const optionalArgs = buildOptionalArgs(options);
-    optionalArgs.forEach((arg, index) => {
-      const isLast = index === optionalArgs.length - 1;
-      lines.push(`  ${arg}${isLast ? "" : " \\"}`);
-    });
+    addCommand("coverage", ['"$PROJECT_PATH"', ...buildOptionalArgs(options)]);
   } else if (options.command === "limits") {
     lines.push("# Resource limits configuration");
-    lines.push(`CONTRACT="${options.path || fallbackValues.limitsContract}"`);
-    lines.push(`FUNCTION="${options.fn || fallbackValues.limitsFunction}"`);
-    lines.push(`RAMP_PARAM="${options.ramp || fallbackValues.limitsRamp}"`);
+    lines.push(`CONTRACT=${assignment(options.path || fallbackValues.limitsContract)}`);
+    lines.push(`FUNCTION=${assignment(options.fn || fallbackValues.limitsFunction)}`);
+    lines.push(`RAMP_PARAM=${assignment(options.ramp || fallbackValues.limitsRamp)}`);
     lines.push("");
     lines.push("# Run resource limits test");
-    lines.push('soroban-testkit limits \\');
-    lines.push('  --contract "$CONTRACT" \\');
-    lines.push('  --fn "$FUNCTION" \\');
-    lines.push('  --ramp "$RAMP_PARAM"');
+    addCommand("limits", ['--contract "$CONTRACT"', '--fn "$FUNCTION"', '--ramp "$RAMP_PARAM"']);
   } else {
     lines.push("# Audit workflow configuration");
-    lines.push(`SOURCE_PATH="${options.path || fallbackValues.auditPath}"`);
+    lines.push(`SOURCE_PATH=${assignment(options.path || fallbackValues.auditPath)}`);
     lines.push(`STRICT_MODE=${options.strict ? "true" : "false"}`);
     lines.push("");
     lines.push("# Run security audit");
-    lines.push('soroban-testkit audit \\');
-    lines.push('  "$SOURCE_PATH"');
-    if (options.strict) {
-      lines.push('  --strict');
-    }
+    addCommand("audit", ['"$SOURCE_PATH"', ...buildOptionalArgs(options)]);
   }
-  
-  lines.push("");
-  lines.push('echo "Command completed successfully"');
-  
+
+  lines.push("", 'echo "Command completed successfully"');
   return lines.join("\n");
 }
 

@@ -151,7 +151,7 @@ describe("Limits option combinations component tests (#199)", () => {
 
   it("renders default limits options and allows editing function and ramp", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
 
     const fnInput = screen.getByLabelText(/function/i);
     const rampInput = screen.getByLabelText(/ramp parameter/i);
@@ -177,7 +177,7 @@ describe("Limits option combinations component tests (#199)", () => {
     });
 
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
 
     const pathInput = screen.getByLabelText(/project or contract path/i);
     const fnInput = screen.getByLabelText(/function/i);
@@ -211,7 +211,7 @@ describe("Audit option combinations component tests (#198)", () => {
 
   it("toggles fail on warnings strict mode in audit workflow", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "audit" }));
 
     const strictCheckbox = screen.getByLabelText(/fail on warnings/i);
     expect(strictCheckbox).toBeChecked();
@@ -236,7 +236,7 @@ describe("Audit option combinations component tests (#198)", () => {
     });
 
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "audit" }));
 
     const pathInput = screen.getByLabelText(/project or contract path/i);
     const strictCheckbox = screen.getByLabelText(/fail on warnings/i);
@@ -256,9 +256,9 @@ describe("Workflow switching component tests (#201)", () => {
   it("switches between all three workflows and updates descriptions and controls", () => {
     render(<App />);
 
-    const coverageButton = screen.getByRole("button", { name: "coverage" });
-    const limitsButton = screen.getByRole("button", { name: "limits" });
-    const auditButton = screen.getByRole("button", { name: "audit" });
+    const coverageButton = screen.getByRole("tab", { name: "coverage" });
+    const limitsButton = screen.getByRole("tab", { name: "limits" });
+    const auditButton = screen.getByRole("tab", { name: "audit" });
 
     // Initial state: coverage
     expect(coverageButton).toHaveClass("active");
@@ -316,7 +316,7 @@ describe("Workflow switching component tests (#201)", () => {
     );
 
     // Switch to limits
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
@@ -325,7 +325,7 @@ describe("Workflow switching component tests (#201)", () => {
     );
 
     // Switch to audit
-    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "audit" }));
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith("soroban-testkit audit . --strict"),
@@ -600,7 +600,7 @@ describe("Visual distinction between required and optional settings (#196)", () 
 
   it("displays Required badges and aria-required on function and ramp in limits workflow", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
 
     const fnInput = screen.getByLabelText("Function");
     const rampInput = screen.getByLabelText("Ramp parameter");
@@ -611,7 +611,7 @@ describe("Visual distinction between required and optional settings (#196)", () 
 
   it("displays Optional badge on fail on warnings option in audit workflow", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "audit" }));
 
     expect(screen.getByLabelText(/fail on warnings/i)).toBeInTheDocument();
     expect(screen.getAllByText("Optional").length).toBeGreaterThanOrEqual(1);
@@ -734,7 +734,7 @@ describe("Command builder enhancements", () => {
 
   it("displays contextual help beside function and ramp inputs", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
 
     expect(screen.getByText(/Use the exported symbol name from your contract ABI/i)).toBeInTheDocument();
     expect(screen.getByText(/Use the parameter you want to increase in the contract input set/i)).toBeInTheDocument();
@@ -849,7 +849,7 @@ describe("Module card command builder links (#129, #130)", () => {
 
     fireEvent.click(moneyLimits);
 
-    expect(screen.getByRole("button", { name: "limits" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("tab", { name: "limits" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("command-output")).toHaveTextContent("soroban-testkit limits");
   });
 });
@@ -911,12 +911,17 @@ describe("Keyboard-only navigation (#109)", () => {
 });
 
 describe("Screen reader semantics (#108)", () => {
-  it("exposes the command selector as a group of toggle buttons rather than a tablist", () => {
+  it("exposes the command selector as a keyboard-operable tablist", () => {
     render(<App />);
 
-    expect(screen.queryByRole("tablist", { name: "Command workflow selector" })).not.toBeInTheDocument();
-    const group = screen.getByRole("group", { name: "Command workflow selector" });
-    expect(within(group).getByRole("button", { name: "coverage" })).toHaveAttribute("aria-pressed", "true");
+    const tablist = screen.getByRole("tablist", { name: "Command workflow selector" });
+    const coverage = within(tablist).getByRole("tab", { name: "coverage" });
+    const limits = within(tablist).getByRole("tab", { name: "limits" });
+    expect(coverage).toHaveAttribute("aria-selected", "true");
+    expect(coverage).toHaveAttribute("tabindex", "0");
+    expect(limits).toHaveAttribute("tabindex", "-1");
+    expect(coverage).toHaveAttribute("aria-controls", "command-workbench-panel");
+    expect(screen.getByRole("tabpanel", { name: "coverage" })).toBeInTheDocument();
   });
 
   it("names the example terminal as a region so its code is announced with a label", () => {
@@ -929,7 +934,7 @@ describe("Screen reader semantics (#108)", () => {
     render(<App />);
     expect(screen.getByRole("button", { name: "Clear project or contract path" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
     expect(screen.getByRole("button", { name: "Clear function" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear ramp parameter" })).toBeInTheDocument();
   });
@@ -1051,7 +1056,7 @@ describe("Accessibility enhancements (#104, #105, #106, #107)", () => {
     expect(srSummary).toHaveTextContent("Active coverage command settings");
 
     // Switching workflow updates the SR summary
-    const limitsTab = screen.getByRole("button", { name: "limits" });
+    const limitsTab = screen.getByRole("tab", { name: "limits" });
     fireEvent.click(limitsTab);
 
     expect(srSummary).toHaveTextContent("Active limits command settings");
@@ -1290,7 +1295,7 @@ describe("Download action for generated shell script", () => {
     
     render(<App />);
     
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
     fireEvent.click(screen.getByRole("button", { name: /download command as shell script/i }));
     
     const addedElements = appendChildSpy.mock.calls.map(call => call[0]);
@@ -1448,7 +1453,7 @@ describe("Inline help text for form fields (#100)", () => {
 
   it("associates help text with fn and ramp inputs in the limits workflow", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
     const fnInput = screen.getByRole("textbox", { name: /^function$/i });
     expect(fnInput.getAttribute("aria-describedby")).toBe("fn-help");
     expect(document.getElementById("fn-help")).not.toBeNull();
@@ -1462,7 +1467,7 @@ describe("Inline help text for form fields (#100)", () => {
 describe("Focus moves to workflow heading on mode switch (#101)", () => {
   it("focuses the command section heading when switching to the limits workflow", () => {
     render(<App />);
-    const limitsButton = screen.getByRole("button", { name: "limits" });
+    const limitsButton = screen.getByRole("tab", { name: "limits" });
     fireEvent.click(limitsButton);
     const heading = screen.getByRole("heading", { name: /from intent to command/i });
     expect(heading).toHaveFocus();
@@ -1470,15 +1475,15 @@ describe("Focus moves to workflow heading on mode switch (#101)", () => {
 
   it("focuses the command section heading when switching back to coverage", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
-    fireEvent.click(screen.getByRole("button", { name: "coverage" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "coverage" }));
     const heading = screen.getByRole("heading", { name: /from intent to command/i });
     expect(heading).toHaveFocus();
   });
 
   it("focuses the command section heading when switching to audit", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+    fireEvent.click(screen.getByRole("tab", { name: "audit" }));
     const heading = screen.getByRole("heading", { name: /from intent to command/i });
     expect(heading).toHaveFocus();
   });
@@ -2099,7 +2104,7 @@ describe("Rapid workflow mode changes (#37)", () => {
 
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /^Copy$/ }));
-    fireEvent.click(screen.getByRole("button", { name: "limits" }));
+    fireEvent.click(screen.getByRole("tab", { name: "limits" }));
 
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("soroban-testkit coverage"));
     expect(screen.getByTestId("command-output")).toHaveTextContent("soroban-testkit limits");
@@ -2227,5 +2232,83 @@ describe("Money module troubleshooting FAQ (#57)", () => {
     fireEvent.click(secondQuestionBtn);
     expect(secondQuestionBtn).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText(/Use checked_add, checked_sub, and checked_mul/i)).toBeInTheDocument();
+  });
+});
+
+describe("Issues #13–#15: accessible controls and copy announcements", () => {
+  const originalClipboard = navigator.clipboard;
+  afterEach(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("lets keyboard users select command tabs with arrows, Home and End", () => {
+    render(<App />);
+    const tabs = screen.getByRole("tablist", { name: "Command workflow selector" });
+    const coverage = within(tabs).getByRole("tab", { name: "coverage" });
+    const limits = within(tabs).getByRole("tab", { name: "limits" });
+    const audit = within(tabs).getByRole("tab", { name: "audit" });
+
+    coverage.focus();
+    fireEvent.keyDown(coverage, { key: "ArrowRight" });
+    expect(limits).toHaveFocus();
+    expect(limits).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "limits" })).toBeInTheDocument();
+    fireEvent.keyDown(limits, { key: "End" });
+    expect(audit).toHaveFocus();
+    expect(audit).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(audit, { key: "ArrowRight" });
+    expect(coverage).toHaveFocus();
+    fireEvent.keyDown(coverage, { key: "ArrowLeft" });
+    expect(audit).toHaveFocus();
+    fireEvent.keyDown(audit, { key: "Home" });
+    expect(coverage).toHaveFocus();
+  });
+
+  it("keeps the mobile navigation reachable and restores focus on Escape", () => {
+    render(<App />);
+    const toggle = screen.getByRole("button", { name: "Open navigation menu" });
+    fireEvent.click(toggle);
+    const menu = document.getElementById("mobile-menu");
+    expect(menu).toHaveAttribute("data-open", "true");
+    const commandsLink = within(menu!).getByRole("link", { name: "Commands" });
+    commandsLink.focus();
+    fireEvent.keyDown(commandsLink, { key: "Escape" });
+    expect(menu).toHaveAttribute("data-open", "false");
+    expect(toggle).toHaveFocus();
+  });
+
+  it("announces successful command copies in an atomic polite status region", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    render(<App />);
+    const status = screen.getByTestId("copy-status");
+    expect(status).toHaveAttribute("aria-atomic", "true");
+    expect(status).toHaveAttribute("aria-live", "polite");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+    await waitFor(() => expect(status).toHaveTextContent("Command copied to clipboard"));
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveAttribute("aria-label", "Command copy status");
+  });
+
+  it("announces clipboard failures through the assertive alert", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy", exact: true }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not copy to clipboard"),
+    );
+    expect(screen.getByTestId("copy-status")).toBeEmptyDOMElement();
   });
 });

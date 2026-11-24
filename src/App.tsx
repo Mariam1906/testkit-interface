@@ -25,6 +25,7 @@ const navSections = [
   { id: "limits-reference", label: "Limits reference" },
 ] as const;
 const navSectionIds = navSections.map((section) => section.id);
+const commandNames = ["coverage", "limits", "audit"] as const;
 
 // Which CLI workflows are most useful for each module (#130). Keyed by module
 // name so adding a module without a mapping fails type-checking.
@@ -804,6 +805,7 @@ export default function App() {
   const moduleSearchRef = useRef<HTMLInputElement>(null);
   // #101 — focus the command section heading after a mode switch
   const commandHeadingRef = useRef<HTMLHeadingElement>(null);
+  const commandKeyboardSelectionRef = useRef(false);
 
   // Resetting from the empty state removes the button that had focus, so move
   // focus back to the search box instead of dropping it to <body> (#123).
@@ -864,6 +866,7 @@ export default function App() {
   // #117 — mobile nav toggle
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const mobileMenuToggleRef = useRef<HTMLButtonElement>(null);
   // #116 — accessibility statement modal
   const [a11yOpen, setA11yOpen] = useState(false);
   // #174 — release notes modal
@@ -1251,6 +1254,29 @@ export default function App() {
     }
   };
 
+  // Arrow/Home/End navigation keeps focus within the command tablist.
+  const handleCommandTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentIndex: number,
+  ) => {
+    const nextIndex =
+      event.key === "ArrowRight"
+        ? (currentIndex + 1) % commandNames.length
+        : event.key === "ArrowLeft"
+          ? (currentIndex - 1 + commandNames.length) % commandNames.length
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? commandNames.length - 1
+              : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const nextCommand = commandNames[nextIndex];
+    if (nextCommand !== command) commandKeyboardSelectionRef.current = true;
+    setCommand(nextCommand);
+    document.getElementById(`command-tab-${nextCommand}`)?.focus();
+  };
+
   const handleWorkflowKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) => {
     const lastIndex = workflowTabs.length - 1;
     const nextIndex =
@@ -1278,6 +1304,10 @@ export default function App() {
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
+      return;
+    }
+    if (commandKeyboardSelectionRef.current) {
+      commandKeyboardSelectionRef.current = false;
       return;
     }
     commandHeadingRef.current?.focus();
@@ -1310,7 +1340,14 @@ export default function App() {
       <a className="skip-link" href="#top">
         Skip to main content
       </a>
-      <p className="sr-only" aria-live="polite">
+      <p
+        className="sr-only"
+        role={announcement ? "status" : undefined}
+        aria-label={announcement ? "Command copy status" : undefined}
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="copy-status"
+      >
         {announcement}
       </p>
       {/* #102 — validation errors announced via assertive live region */}
@@ -1326,6 +1363,7 @@ export default function App() {
         <button
           type="button"
           className="mobile-menu-toggle"
+          ref={mobileMenuToggleRef}
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
           aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
@@ -1333,7 +1371,18 @@ export default function App() {
         >
           <span aria-hidden="true">{mobileMenuOpen ? "✕" : "☰"}</span>
         </button>
-        <div className="nav-links" id="mobile-menu" ref={mobileMenuRef} data-open={mobileMenuOpen}>
+        <div
+          className="nav-links"
+          id="mobile-menu"
+          ref={mobileMenuRef}
+          data-open={mobileMenuOpen}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            setMobileMenuOpen(false);
+            mobileMenuToggleRef.current?.focus();
+          }}
+        >
           {navSections.map((section) => (
             <a
               key={section.id}
@@ -2313,13 +2362,19 @@ export default function App() {
           {/* #101 — heading receives focus after workflow tab switch */}
           <h2 ref={commandHeadingRef} tabIndex={-1}>From intent to command.</h2>
           <p>Configure a supported Testkit workflow and copy the exact command to your terminal.</p>
-          <div className="command-tabs" role="group" aria-label="Command workflow selector">
-            {(["coverage", "limits", "audit"] as const).map((name) => (
+          <div className="command-tabs" role="tablist" aria-label="Command workflow selector">
+            {commandNames.map((name, index) => (
               <button
                 key={name}
+                id={`command-tab-${name}`}
+                type="button"
+                role="tab"
+                aria-selected={command === name}
+                aria-controls="command-workbench-panel"
+                tabIndex={command === name ? 0 : -1}
                 className={command === name ? "active" : ""}
                 onClick={() => setCommand(name)}
-                aria-pressed={command === name}
+                onKeyDown={(event) => handleCommandTabKeyDown(event, index)}
               >
                 {name}
               </button>
@@ -2392,7 +2447,13 @@ export default function App() {
             Compare two configurations
           </button>
         </div>
-        <div className="builder">
+        <div
+          className="builder"
+          role="tabpanel"
+          id="command-workbench-panel"
+          aria-labelledby={`command-tab-${command}`}
+          tabIndex={0}
+        >
           <label>
             <div className="field-header">
               <span>Project or contract path</span>
