@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -206,6 +207,7 @@ describe("Generated command quoting for tabs and line breaks (#21)", () => {
 
     expect(screen.getByTestId("command-output")).toHaveTextContent(
       'soroban-testkit coverage "./my\tcontract" --format html --open',
+      { normalizeWhitespace: false },
     );
   });
 
@@ -219,6 +221,7 @@ describe("Generated command quoting for tabs and line breaks (#21)", () => {
 
     expect(screen.getByTestId("command-output")).toHaveTextContent(
       'soroban-testkit audit "./src\tpkg" --strict',
+      { normalizeWhitespace: false },
     );
   });
 });
@@ -3366,5 +3369,99 @@ describe("Command history restore with an active module filter (#358)", () => {
     expect(filterInput).toHaveValue("nonexistent-module");
     expect(screen.getByRole("heading", { name: /No modules match/ })).toBeInTheDocument();
     expect(document.getElementById("module-grid")).toBeNull();
+  });
+});
+
+describe("Clipboard feedback and usability regressions (#16-#19)", () => {
+  const styles = readFileSync("src/styles.css", "utf8");
+  const originalClipboard = navigator.clipboard;
+
+  afterEach(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      configurable: true,
+    });
+    vi.useRealTimers();
+  });
+
+  it("does not let an older copy timer reset newer copy feedback (#16)", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Copied")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy command with explanatory comments" }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Copied with comments")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1600);
+    });
+    expect(screen.getByText("Copied with comments")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1400);
+    });
+    expect(screen.queryByText("Copied with comments")).not.toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith("soroban-testkit coverage . --format html --open");
+  });
+
+  it("shows a visible error when the clipboard rejects a copy (#17)", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+
+    expect(await screen.findByTestId("copy-error")).toHaveTextContent(
+      /could not copy to clipboard/i,
+    );
+  });
+
+  it("defines visible keyboard focus rings for interactive controls (#18)", () => {
+    expect(styles).toMatch(/button:focus-visible[^}]*outline: 2px/);
+    expect(styles).toMatch(/a:focus-visible[^}]*outline: 2px/);
+    expect(styles).toMatch(/\[role="tab"\]:focus-visible[^}]*outline: 2px/);
+  });
+
+  it("shows the effective default path in the audit field (#19)", () => {
+    render(<App />);
+
+    expect(screen.getByRole("textbox", { name: /project or contract path/i })).toHaveAttribute(
+      "placeholder",
+      ".",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "audit" }));
+
+    expect(screen.getByRole("textbox", { name: /project or contract path/i })).toHaveAttribute(
+      "placeholder",
+      "./src",
+    );
+    expect(screen.getByTestId("command-output")).toHaveTextContent(
+      "soroban-testkit audit . --strict",
+    );
   });
 });

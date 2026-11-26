@@ -114,7 +114,7 @@ export const modules: ReadonlyArray<{
 
 const quote = (value: string) => {
   if (/^[A-Za-z0-9_./-]+$/.test(value)) return value;
-  if (/^[A-Za-z0-9_./ -]+$/.test(value)) return `"${value}"`;
+  if (/^[A-Za-z0-9_./\s-]+$/.test(value)) return `"${value}"`;
 
   // Paths with shell-significant characters must remain one literal POSIX argument.
   return `'${value.replace(/'/g, "'\\''")}'`;
@@ -127,6 +127,8 @@ const quote = (value: string) => {
  */
 const protectOptionPrefix = (value: string) =>
   value.startsWith("-") ? `./${value}` : value;
+
+const hasPath = (value: string) => value.trim().length > 0;
 
 const quotePath = (value: string) => quote(protectOptionPrefix(value));
 
@@ -189,7 +191,7 @@ export function buildCommand(options: CommandOptions): string {
     }
     return [
       "soroban-testkit coverage",
-      options.path && quotePath(options.path),
+      hasPath(options.path) ? quotePath(options.path) : "",
       ...buildOptionalArgs(options),
     ]
       .filter(Boolean)
@@ -200,7 +202,7 @@ export function buildCommand(options: CommandOptions): string {
     return [
       "soroban-testkit limits",
       "--contract",
-      quotePath(options.path || fallbackValues.limitsContract),
+      quotePath(hasPath(options.path) ? options.path : fallbackValues.limitsContract),
       "--fn",
       options.fn || fallbackValues.limitsFunction,
       "--ramp",
@@ -210,7 +212,7 @@ export function buildCommand(options: CommandOptions): string {
 
   return [
     "soroban-testkit audit",
-    quotePath(options.path || fallbackValues.auditPath),
+    quotePath(hasPath(options.path) ? options.path : fallbackValues.auditPath),
     ...buildOptionalArgs(options),
   ]
     .filter(Boolean)
@@ -227,7 +229,7 @@ export function formatCommandLine(
 
   if (options.command === "coverage") {
     const args: string[] = [];
-    if (options.path) args.push(quotePath(options.path));
+    if (hasPath(options.path)) args.push(quotePath(options.path));
     args.push(...buildOptionalArgs(options));
 
     if (args.length === 0) {
@@ -241,7 +243,7 @@ export function formatCommandLine(
   }
 
   if (options.command === "limits") {
-    const contractPath = quotePath(options.path || fallbackValues.limitsContract);
+    const contractPath = quotePath(hasPath(options.path) ? options.path : fallbackValues.limitsContract);
     const fn = options.fn || fallbackValues.limitsFunction;
     const ramp = options.ramp || fallbackValues.limitsRamp;
 
@@ -271,7 +273,7 @@ export function formatCommandWithComments(options: CommandOptions): string {
   if (options.command === "coverage") {
     comments.push("# Generate contract-test coverage through cargo-llvm-cov");
     comments.push("soroban-testkit coverage \\");
-    if (options.path) {
+    if (hasPath(options.path)) {
       comments.push(`  ${quotePath(options.path)} \\  # Project or contract path`);
     }
     const optionalArgs = buildOptionalArgs(options);
@@ -290,7 +292,7 @@ export function formatCommandWithComments(options: CommandOptions): string {
     }
   } else if (options.command === "limits") {
     comments.push("# Ramp a contract input to find its practical resource ceiling");
-    const contractPath = quotePath(options.path || fallbackValues.limitsContract);
+    const contractPath = quotePath(hasPath(options.path) ? options.path : fallbackValues.limitsContract);
     const fn = options.fn || fallbackValues.limitsFunction;
     const ramp = options.ramp || fallbackValues.limitsRamp;
     
@@ -345,7 +347,7 @@ export function formatCommandAsScript(options: CommandOptions): string {
 
   if (options.command === "coverage") {
     lines.push("# Coverage workflow configuration");
-    lines.push(`PROJECT_PATH=${shellDoubleQuote(protectOptionPrefix(options.path || "."))}`);
+    lines.push(`PROJECT_PATH=${shellDoubleQuote(protectOptionPrefix(hasPath(options.path) ? options.path : "."))}`);
     lines.push(`FORMAT=${shellDoubleQuote(options.format)}`);
     lines.push(`OPEN_REPORT=${options.format === "html" && options.open ? "true" : "false"}`);
     lines.push("");
@@ -362,7 +364,7 @@ export function formatCommandAsScript(options: CommandOptions): string {
     );
   } else if (options.command === "limits") {
     lines.push("# Resource limits configuration");
-    lines.push(`CONTRACT=${shellDoubleQuote(protectOptionPrefix(options.path || fallbackValues.limitsContract))}`);
+    lines.push(`CONTRACT=${shellDoubleQuote(protectOptionPrefix(hasPath(options.path) ? options.path : fallbackValues.limitsContract))}`);
     lines.push(`FUNCTION=${shellDoubleQuote(options.fn || fallbackValues.limitsFunction)}`);
     lines.push(`RAMP_PARAM=${shellDoubleQuote(options.ramp || fallbackValues.limitsRamp)}`);
     lines.push("");
@@ -377,7 +379,7 @@ export function formatCommandAsScript(options: CommandOptions): string {
     );
   } else {
     lines.push("# Audit workflow configuration");
-    lines.push(`SOURCE_PATH=${shellDoubleQuote(protectOptionPrefix(options.path || fallbackValues.auditPath))}`);
+    lines.push(`SOURCE_PATH=${shellDoubleQuote(protectOptionPrefix(hasPath(options.path) ? options.path : fallbackValues.auditPath))}`);
     lines.push(`STRICT_MODE=${options.strict ? "true" : "false"}`);
     lines.push("");
     lines.push("# Run security audit");

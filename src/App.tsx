@@ -785,6 +785,151 @@ function highlightCommand(command: string): React.ReactNode {
   return parts;
 }
 
+const TOKENS_RUST_EXAMPLE = `use soroban_testkit::core::TestEnv;
+use soroban_testkit::tokens::MockToken;
+
+#[test]
+fn transfer_updates_balances() {
+    let env = TestEnv::new();
+    env.env().mock_all_auths();
+
+    let admin = env.address();
+    let alice = env.address();
+    let bob = env.address();
+
+    let token = MockToken::deploy(&env, &admin);
+    token.mint(&alice, &10_000_000);
+    token.transfer(&alice, &bob, &2_500_000);
+
+    assert_eq!(token.balance(&alice), 7_500_000);
+    assert_eq!(token.balance(&bob), 2_500_000);
+}`;
+void TOKENS_RUST_EXAMPLE;
+
+const COPY_FEEDBACK_MS = 3000;
+const SHORT_FEEDBACK_MS = 1600;
+
+type ActivateFeedback = () => void;
+
+function useCopyFeedback() {
+  const [copied, setCopied] = useState(false);
+  const [copiedCommentsMode, setCopiedCommentsMode] = useState<"with" | "without" | null>(null);
+  const [copiedAsScript, setCopiedAsScript] = useState(false);
+  const [copiedStep, setCopiedStep] = useState<number | null>(null);
+  const [copiedModuleExample, setCopiedModuleExample] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  const [validationError, setValidationError] = useState("");
+  const feedbackTimers = useRef<number[]>([]);
+  const failureTimer = useRef<number | null>(null);
+  const announcementTimer = useRef<number | null>(null);
+
+  const clearFeedbackTimers = useCallback(() => {
+    feedbackTimers.current.forEach((timer) => window.clearTimeout(timer));
+    feedbackTimers.current = [];
+  }, []);
+
+  const resetFeedback = useCallback(() => {
+    setCopied(false);
+    setCopiedCommentsMode(null);
+    setCopiedAsScript(false);
+    setCopiedStep(null);
+    setCopiedModuleExample(null);
+    setAnnouncement("");
+  }, []);
+
+  const resetCopyLabels = useCallback(() => {
+    clearFeedbackTimers();
+    setCopied(false);
+    setCopiedCommentsMode(null);
+    setCopiedAsScript(false);
+    setCopiedStep(null);
+    setCopiedModuleExample(null);
+  }, [clearFeedbackTimers]);
+
+  const announce = useCallback((message: string, duration = COPY_FEEDBACK_MS) => {
+    if (announcementTimer.current !== null) {
+      window.clearTimeout(announcementTimer.current);
+    }
+    setAnnouncement(message);
+    announcementTimer.current = window.setTimeout(() => setAnnouncement(""), duration);
+  }, []);
+
+  // Every new copy action cancels the previous reset timer, so an old timer
+  // can never clear the feedback of a newer copy (#16).
+  const showFeedback = useCallback((
+    message: string,
+    activate: ActivateFeedback = () => {},
+    duration = COPY_FEEDBACK_MS,
+  ) => {
+    if (announcementTimer.current !== null) {
+      window.clearTimeout(announcementTimer.current);
+      announcementTimer.current = null;
+    }
+    clearFeedbackTimers();
+    resetFeedback();
+    setValidationError("");
+    activate();
+    setAnnouncement(message);
+    feedbackTimers.current.push(window.setTimeout(resetFeedback, duration));
+  }, [clearFeedbackTimers, resetFeedback]);
+
+  const setCopyValidationError = useCallback((message: string) => {
+    if (failureTimer.current !== null) {
+      window.clearTimeout(failureTimer.current);
+      failureTimer.current = null;
+    }
+    setValidationError(message);
+  }, []);
+
+  const showFailure = useCallback(() => {
+    clearFeedbackTimers();
+    resetFeedback();
+    setCopyValidationError(
+      "Could not copy to clipboard. Select the command and press Ctrl/Cmd+C to copy it manually.",
+    );
+    failureTimer.current = window.setTimeout(() => setValidationError(""), COPY_FEEDBACK_MS);
+  }, [clearFeedbackTimers, resetFeedback, setCopyValidationError]);
+
+  const resetForCommandChange = useCallback(() => {
+    if (announcementTimer.current !== null) {
+      window.clearTimeout(announcementTimer.current);
+      announcementTimer.current = null;
+    }
+    clearFeedbackTimers();
+    resetFeedback();
+    setCopyValidationError("");
+  }, [clearFeedbackTimers, resetFeedback, setCopyValidationError]);
+
+  useEffect(() => () => {
+    clearFeedbackTimers();
+    if (failureTimer.current !== null) window.clearTimeout(failureTimer.current);
+    if (announcementTimer.current !== null) window.clearTimeout(announcementTimer.current);
+  }, [clearFeedbackTimers]);
+
+  return {
+    copied,
+    copiedCommentsMode,
+    copiedAsScript,
+    copiedStep,
+    copiedModuleExample,
+    announcement,
+    validationError,
+    showFeedback,
+    showFailure,
+    announce,
+    setCopyValidationError,
+    resetForCommandChange,
+    resetCopyLabels,
+    setCopied,
+    setCopiedCommentsMode,
+    setCopiedAsScript,
+    setCopiedStep,
+    setCopiedModuleExample,
+    setAnnouncement,
+    setValidationError,
+  };
+}
+
 export default function App() {
   const [command, setCommand] = useState<CommandName>("coverage");
   const [path, setPath] = useState(".");
@@ -794,25 +939,49 @@ export default function App() {
   const [ramp, setRamp] = useState("recipients");
   const [strict, setStrict] = useState(true);
   const [shell, setShell] = useState<"bash" | "zsh" | "fish" | "sh">("bash");
-  const [copied, setCopied] = useState(false);
-  const [copiedStep, setCopiedStep] = useState<number | null>(null);
-  const [copiedModuleExample, setCopiedModuleExample] = useState<string | null>(null);
-  const [includeComments, setIncludeComments] = useState(true);
-  const [copiedCommentsMode, setCopiedCommentsMode] = useState<"with" | "without" | null>(null);
-  const [copiedAsScript, setCopiedAsScript] = useState(false);
+  // Copy buttons change their label, which screen readers often skip; the
+  // polite live region announces the result explicitly (#108, #16).
+  const {
+    copied,
+    copiedStep,
+    copiedModuleExample,
+    copiedCommentsMode,
+    copiedAsScript,
+    announcement,
+    validationError,
+    showFeedback,
+    showFailure,
+    announce,
+    setCopyValidationError,
+    resetForCommandChange,
+    resetCopyLabels,
+    setCopied,
+    setCopiedCommentsMode,
+    setCopiedAsScript,
+    setCopiedStep,
+    setCopiedModuleExample,
+    setAnnouncement,
+    setValidationError,
+  } = useCopyFeedback();
+  const [includeComments, setIncludeComments] = useState(() => {
+    try {
+      const savedPreference = window.localStorage.getItem(COPY_COMMENTS_PREFERENCE_KEY);
+      if (savedPreference === "true" || savedPreference === "false") {
+        return savedPreference === "true";
+      }
+    } catch {
+      return true;
+    }
+    return true;
+  });
   // Issue #143: Command history for restore functionality
   const [commandHistory, setCommandHistory] = useState<CommandOptions[]>([]);
-  // Copy buttons change their label, which screen readers often skip; this
-  // polite live region announces the result explicitly (#108).
-  const [announcement, setAnnouncement] = useState("");
   const [moduleFilter, setModuleFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<ModuleCategory | null>(null);
   const [selectedModule, setSelectedModule] = useState<string | null>(null);
   const [expandedModuleCards, setExpandedModuleCards] = useState<Record<string, boolean>>({});
   const [moduleTocOpen, setModuleTocOpen] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  // #102 — validation errors announced via live region
-  const [validationError, setValidationError] = useState("");
   const moduleSearchRef = useRef<HTMLInputElement>(null);
   // #101 — focus the command section heading after a mode switch
   const commandHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -985,9 +1154,7 @@ export default function App() {
   // switch instead of relying on the button label or a silent input reset.
   const changeCommand = (next: CommandName) => {
     setCommand(next);
-    setCopied(false);
-    setCopiedCommentsMode(null);
-    setCopiedAsScript(false);
+    resetForCommandChange();
     setAnnouncement(`Active command: ${next}`);
   };
 
@@ -1023,15 +1190,8 @@ export default function App() {
   }, [generated]);
 
   useEffect(() => {
-    try {
-      const savedPreference = window.localStorage.getItem(COPY_COMMENTS_PREFERENCE_KEY);
-      if (savedPreference === "true" || savedPreference === "false") {
-        setIncludeComments(savedPreference === "true");
-      }
-    } catch {
-      setValidationError("Could not load your saved comments preference. Comments will remain enabled for this visit.");
-    }
-  }, []);
+    resetCopyLabels();
+  }, [command, generated, resetCopyLabels]);
 
   const handleReset = () => {
     setPath(".");
@@ -1167,7 +1327,7 @@ export default function App() {
     
     // Remove from history after restoring
     setCommandHistory((prev) => prev.slice(1));
-    setAnnouncement("Previous command restored");
+    announce("Previous command restored", SHORT_FEEDBACK_MS);
   };
 
   const applyAdvancedCommand = () => {
@@ -1216,8 +1376,7 @@ export default function App() {
     // #334: the editor is used from a screen reader's virtual cursor, where no
     // focus or visible-only state change is announced. Use the polite live
     // region so applying the command is confirmed to assistive technology.
-    setAnnouncement("Multiline command applied");
-    window.setTimeout(() => setAnnouncement(""), 3000);
+    announce("Multiline command applied");
   };
 
   // Issue #34 — when the clipboard is blocked, select the generated command so
@@ -1233,31 +1392,18 @@ export default function App() {
     node.focus();
   };
 
-  const showCopyFailure = () => {
-    setValidationError(
-      "Could not copy to clipboard. Select the command and press Ctrl/Cmd+C to copy it manually.",
-    );
-    window.setTimeout(() => setValidationError(""), 3000);
-  };
-
   const copy = async () => {
     const requested = generated;
     try {
       await copyToClipboard(requested);
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
-      setCopied(true);
-      setValidationError("");
-      setAnnouncement("Command copied to clipboard");
-      window.setTimeout(() => {
-        setCopied(false);
-        setAnnouncement("");
-      }, 3000);
+      showFeedback("Command copied to clipboard", () => setCopied(true));
     } catch {
       if (generatedRef.current === requested) {
         // Issue #34 — the command stays selectable so it can still be copied.
         selectCommandOutput();
-        showCopyFailure();
+        showFailure();
       }
     }
   };
@@ -1271,19 +1417,14 @@ export default function App() {
       await copyToClipboard(commandToCopy);
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
-      setValidationError("");
-      setCopiedCommentsMode(includeCommentsForCopy ? "with" : "without");
-      setAnnouncement(
+      showFeedback(
         includeCommentsForCopy
           ? "Command with comments copied to clipboard"
           : "Command without comments copied to clipboard",
+        () => setCopiedCommentsMode(includeCommentsForCopy ? "with" : "without"),
       );
-      window.setTimeout(() => {
-        setCopiedCommentsMode(null);
-        setAnnouncement("");
-      }, 3000);
     } catch {
-      if (generatedRef.current === requested) showCopyFailure();
+      if (generatedRef.current === requested) showFailure();
     }
   };
 
@@ -1292,7 +1433,7 @@ export default function App() {
     try {
       window.localStorage.setItem(COPY_COMMENTS_PREFERENCE_KEY, String(checked));
     } catch {
-      setValidationError("Could not save your comments preference. It will reset when you leave.");
+      setCopyValidationError("Could not save your comments preference. It will reset when you leave.");
     }
   };
 
@@ -1304,45 +1445,33 @@ export default function App() {
       await copyToClipboard(script);
       if (generatedRef.current !== requested) return;
       saveToHistory(); // Save to history when copying
-      setCopiedAsScript(true);
-      setValidationError("");
-      setAnnouncement("Shell script copied to clipboard");
-      window.setTimeout(() => {
-        setCopiedAsScript(false);
-        setAnnouncement("");
-      }, 3000);
+      showFeedback("Shell script copied to clipboard", () => setCopiedAsScript(true));
     } catch {
-      if (generatedRef.current === requested) showCopyFailure();
+      if (generatedRef.current === requested) showFailure();
     }
   };
 
   const copyStep = async (index: number, stepCommand: string) => {
     try {
       await copyToClipboard(stepCommand);
-      setCopiedStep(index);
-      setValidationError("");
-      setAnnouncement(`Step ${index + 1} command copied to clipboard`);
-      window.setTimeout(() => {
-        setCopiedStep(null);
-        setAnnouncement("");
-      }, 3000);
+      showFeedback(
+        `Step ${index + 1} command copied to clipboard`,
+        () => setCopiedStep(index),
+      );
     } catch {
-      showCopyFailure();
+      showFailure();
     }
   };
 
   const copyModuleExample = async (moduleName: string, exampleCode: string) => {
     try {
       await copyToClipboard(exampleCode);
-      setCopiedModuleExample(moduleName);
-      setValidationError("");
-      setAnnouncement(`${moduleName} module Rust example copied to clipboard`);
-      window.setTimeout(() => {
-        setCopiedModuleExample(null);
-        setAnnouncement("");
-      }, 3000);
+      showFeedback(
+        `${moduleName} module Rust example copied to clipboard`,
+        () => setCopiedModuleExample(moduleName),
+      );
     } catch {
-      showCopyFailure();
+      showFailure();
     }
   };
 
@@ -1384,8 +1513,7 @@ export default function App() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    setAnnouncement("Command script downloaded");
-    window.setTimeout(() => setAnnouncement(""), 1600);
+    announce("Command script downloaded", SHORT_FEEDBACK_MS);
   };
 
   const toggleComparison = () => {
@@ -1448,8 +1576,8 @@ export default function App() {
     if (typeof panel.scrollIntoView === "function") {
       panel.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    setAnnouncement("Jumped to the Audit command output panel");
-  }, [auditOutputFocusRequest]);
+    announce("Jumped to the Audit command output panel");
+  }, [auditOutputFocusRequest, announce]);
 
   // Issue #261 — Expected behavior: pressing Ctrl/Cmd + Shift + L from anywhere
   // on the page selects the Limits workflow (when another workflow is active),
@@ -1466,8 +1594,8 @@ export default function App() {
     if (typeof panel.scrollIntoView === "function") {
       panel.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    setAnnouncement("Jumped to the Limits command output panel");
-  }, [limitsOutputFocusRequest]);
+    announce("Jumped to the Limits command output panel");
+  }, [limitsOutputFocusRequest, announce]);
 
   // #356 — Expected behavior: Ctrl/Cmd+Shift+C switches to Coverage when
   // necessary, then focuses and scrolls the shared generated-output region.
@@ -1479,19 +1607,19 @@ export default function App() {
     if (typeof panel.scrollIntoView === "function") {
       panel.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    setAnnouncement("Jumped to the Coverage command output panel");
-  }, [coverageOutputFocusRequest]);
+    announce("Jumped to the Coverage command output panel");
+  }, [coverageOutputFocusRequest, announce]);
 
   // #102, #350, #264 — validate required fields and announce actionable errors.
   const validateAndCopy = async () => {
     if (command === "audit" && !path.trim()) {
-      setValidationError(
+      setCopyValidationError(
         "Audit source path is required. Enter the contract source directory (for example, ./src).",
       );
       return;
     }
     if (!path.trim()) {
-      setValidationError(
+      setCopyValidationError(
         command === "coverage"
           ? "Project or contract path is required for Coverage. Enter a Cargo workspace directory such as . or ./contracts/token before copying the command."
           : "Project or contract path is required.",
@@ -1501,19 +1629,27 @@ export default function App() {
     }
     if (command === "limits") {
       if (!fn.trim()) {
-        setValidationError("Function name is required.");
+        setCopyValidationError("Function name is required.");
         return;
       }
       if (!ramp.trim()) {
-        setValidationError("Ramp parameter is required.");
+        setCopyValidationError("Ramp parameter is required.");
         return;
       }
     }
-    setValidationError("");
+    setCopyValidationError("");
     await copy();
   };
 
   const fieldClasses = "field-input";
+  // #19 — show the value the generated command actually falls back to when
+  // the path field is empty, most importantly ./src for audit.
+  const pathPlaceholder =
+    command === "audit"
+      ? fallbackValues.auditPath
+      : command === "limits"
+        ? fallbackValues.limitsContract
+        : ".";
 
   return (
     <main>
@@ -2689,7 +2825,8 @@ export default function App() {
                 className={fieldClasses}
                 ref={pathInputRef}
                 value={path}
-                onChange={(event) => { setPath(event.target.value); if (event.target.value.trim()) setValidationError(""); }}
+                placeholder={pathPlaceholder}
+                onChange={(event) => { setPath(event.target.value); if (event.target.value.trim()) setCopyValidationError(""); }}
                 aria-label="Project or contract path"
                 aria-required="true"
                 aria-invalid={Boolean(validationError) || undefined}
@@ -2804,7 +2941,7 @@ export default function App() {
                     className={fieldClasses}
                     ref={fnInputRef}
                     value={fn}
-                    onChange={(event) => { setFn(event.target.value); if (event.target.value.trim()) setValidationError(""); }}
+                    onChange={(event) => { setFn(event.target.value); if (event.target.value.trim()) setCopyValidationError(""); }}
                     aria-label="Function"
                     aria-required="true"
                     aria-describedby="fn-help"
@@ -2834,7 +2971,7 @@ export default function App() {
                     className={fieldClasses}
                     ref={rampInputRef}
                     value={ramp}
-                    onChange={(event) => { setRamp(event.target.value); if (event.target.value.trim()) setValidationError(""); }}
+                    onChange={(event) => { setRamp(event.target.value); if (event.target.value.trim()) setCopyValidationError(""); }}
                     aria-label="Ramp parameter"
                     aria-required="true"
                     aria-describedby="ramp-help"
@@ -2966,6 +3103,13 @@ export default function App() {
             </div>
           </div>
 
+          {/* #17 — clipboard failures and validation errors must be visible */}
+          {validationError && (
+            <p className="copy-error" data-testid="copy-error">
+              {validationError}
+            </p>
+          )}
+
           {/* Issue #144 & #145: Additional copy options */}
           <div className="copy-options">
             <label className="copy-comments-preference">
@@ -3058,11 +3202,12 @@ export default function App() {
                         onClick={async () => {
                           try {
                             await copyToClipboard(cmd);
-                            setValidationError("");
-                            setAnnouncement(`History command ${commandHistory.length - index} copied`);
-                            window.setTimeout(() => setAnnouncement(""), 1600);
+                            announce(
+                              `History command ${commandHistory.length - index} copied`,
+                              SHORT_FEEDBACK_MS,
+                            );
                           } catch {
-                            showCopyFailure();
+                            showFailure();
                           }
                         }}
                         aria-label={`Copy history command ${commandHistory.length - index}`}
@@ -3073,6 +3218,7 @@ export default function App() {
                   );
                 })}
                 {commandHistory.length > 0 && (
+
                   <button
                     type="button"
                     className="button secondary"
@@ -3080,8 +3226,7 @@ export default function App() {
                       // Clear unmounts its focused button; return to the persistent Copy action.
                       copyButtonRef.current?.focus();
                       setCommandHistory([]);
-                      setAnnouncement("Command history cleared");
-                      window.setTimeout(() => setAnnouncement(""), 1600);
+                      announce("Command history cleared", SHORT_FEEDBACK_MS);
                     }}
                   >
                     Clear history
