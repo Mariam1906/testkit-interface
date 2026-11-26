@@ -2,6 +2,15 @@
 
 `soroban_testkit::core` provides `TestEnv`, a wrapper around `soroban_sdk::Env` that tracks testkit state (ledger clock position, captured events, registered tokens) alongside the raw SDK environment, and `TestkitError`, the error type the assertion helpers panic with. Every other module extends `TestEnv` rather than introducing its own handle, so one `TestEnv` is enough for a whole test.
 
+## API overview
+
+- `TestEnv::new()` — creates a deterministic environment wrapping `soroban_sdk::Env`; every other testkit module extends it.
+- `TestEnv::with_seed(n)` — creates a reproducible environment so generated addresses and values repeat across runs.
+- `env.address()` / `env.addresses(n)` — generates a test address for a caller or contract, or several at once.
+- `env.env()` — returns the underlying `&soroban_sdk::Env` for SDK calls the core module does not wrap directly.
+- `env.reset()` — clears contracts and the ledger clock while keeping the original seed and close interval.
+- `TestkitError::code()` — classifies an assertion failure by a stable code instead of matching panic message text.
+
 ## Quick start
 
 1. Add the crate as a dev-dependency: `cargo add --dev soroban-testkit`.

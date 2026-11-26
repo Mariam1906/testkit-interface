@@ -48,6 +48,16 @@
 - **`allowance exceeded or missing approval`**: `token.transfer_from` requires a prior `token.approve(&owner, &spender, amount, expiration_ledger)` covering the transfer amount that has not expired.
 - **`authorization error on transfer`**: unlike `token.mint` (which uses test admin privileges), `token.transfer` and `token.approve` enforce SAC authorization. Mock auth for the sender or owner when testing without `mock_all_auths`.
 
+## Related command-builder workflows
+
+When token tests move from library setup to CLI verification, use the command-builder workflows documented in the [README](../README.md#workflow-testing--verification):
+
+- **Coverage** — measure which token-contract test paths execute and choose HTML, LCOV, or text output.
+- **Limits** — probe resource ceilings for token-heavy entry points such as batched transfers or minting flows.
+- **Audit** — scan contract sources for authorization, arithmetic, and TTL risks that commonly matter in token integrations.
+
+These are CLI workflows; the `tokens` API on this page remains a Rust test module.
+
 ## Version and compatibility
 
 - **Current version**: Soroban SDK 27.0.x and later.
@@ -58,3 +68,12 @@
   - **Signed `i128` amounts**: All token amounts and balances use `i128`; negative values or overflows panic as in the Soroban SAC.
   - **Auth requirements on transfers**: `token.mint` uses test admin privileges, whereas `token.transfer` and `token.transfer_from` follow standard SAC authorization rules.
   - **Isolated per `TestEnv`**: Each `env.token()` instance is scoped to its `TestEnv` and does not share state across tests.
+
+## Related command-builder workflows
+
+The [command builder](../README.md#features) in this interface provides offline CLI tooling to benchmark, measure, and audit contracts using `soroban_testkit::tokens`:
+
+- **[Limits Workflow](../README.md#features)** — Benchmark and verify resource consumption (CPU instructions and memory) for token entrypoints like `transfer` or custom batch operations via `soroban-testkit limits`. See the [Limits command reference](../README.md#features) and [Limits Workflow verification](../README.md#workflow-testing--verification).
+- **[Coverage Workflow](../README.md#features)** — Generate coverage reports (`html`, `lcov`, `text`) for token test suites using `soroban-testkit coverage` with the [Coverage preflight checklist](../README.md#features).
+- **[Audit Workflow](../README.md#features)** — Verify contract source invariants, strict auth checks, and signed `i128` boundary handling prior to deployment via `soroban-testkit audit`. See [Audit workflow support](../README.md#features).
+

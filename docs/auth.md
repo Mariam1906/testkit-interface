@@ -1,5 +1,11 @@
 # auth module
 
+> **Library API, not a CLI subcommand.** The `soroban-testkit` executable
+> offers `coverage`, `limits`, `audit` and `help` (see
+> `soroban-testkit --help`). It has no `auth` command or auth-specific
+> flags. The `soroban_testkit::auth` module is used in Rust tests run with
+> `cargo test`, not from the CLI.
+
 `soroban_testkit::auth` checks that privileged entry points reject callers who are not allowed to call them.
 
 ## API overview
@@ -45,9 +51,17 @@ fn only_owner_can_withdraw() {
 }
 ```
 
-In a real test, each closure calls your contract's generated `try_*` client method with `mock_auths` set to `caller`, and returns `Ok(())` when the call succeeded.
+This example illustrates matrix semantics with ordinary closures rather
+than invoking a deployed contract. In a real integration test, each closure
+calls the generated `try_*` contract-client method with per-call
+`mock_auths` using `MockAuth` and `MockAuthInvoke` for the tested caller,
+function and arguments. Map successful client calls to `Ok(())` and
+rejections to `Err(...)`. Do not use `mock_all_auths`, which bypasses
+the authorization checks the matrix must verify.
 
 For a single call, use `env.assert_requires_auth(|| { /* call without auth */ })`.
+This helper catches *any panic*, so ensure the invocation would otherwise
+succeed; an unrelated contract panic can otherwise produce a false positive.
 
 ## Common failure modes
 
@@ -56,6 +70,10 @@ For a single call, use `env.assert_requires_auth(|| { /* call without auth */ })
 - **A gap nobody notices**: the matrix only cross-checks addresses listed as `allowed` on some entry point. An attacker address that appears nowhere is never tried, so add it to an open entry point (as `other` above) or the test passes without checking it.
 - **`expected the call to fail without authorization, but it succeeded`**: from `assert_requires_auth`. The closure returned normally, so the call did not require auth.
 - **Closure always returns `Ok`**: mapping every result to `Ok(())` hides rejections. Return `Err` whenever the `try_*` call fails.
+
+## CLI help terminology
+
+Run `soroban-testkit --help` for the executable's supported workflows: `coverage`, `limits`, and `audit`. The CLI doesn't run `AuthMatrix` directly. For this module, the commands are `cargo add --dev soroban-testkit` to install the Rust testing crate and `cargo test` to execute your authorization tests. The method names `.entry_point(...)` and `.assert_enforced()` are **Rust methods**, not flags or subcommands.
 
 ## Version and compatibility
 

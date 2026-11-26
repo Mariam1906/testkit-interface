@@ -2,11 +2,18 @@
 
 `soroban_testkit::ledger` provides deterministic time, sequence, and clock control over an in-memory Soroban ledger state.
 
+This guide covers the Rust testing API, not a `soroban-testkit ledger` command.
+The CLI exposes `coverage`, `limits`, and `audit`; its `__limits-probe` helper
+is hidden, and there is no ledger subcommand
+([CLI command definitions](https://github.com/soroban-testkit/testkit-blockchain/blob/main/crates/cli/src/commands/mod.rs)).
+For the command-builder workflows this interface does support, see the
+[README workflow testing overview](../README.md#workflow-testing--verification).
+
 ## Version and compatibility
 
 - **Current version**: Soroban SDK 27.0.x and later.
 - **Minimum Rust version**: Rust 1.84 or later with `wasm32v1-none` target.
-- **Stellar network support**: Compatible with Testnet and Mainnet ledger sequence and timestamp semantics.
+- **Network access**: Uses the in-memory SDK test ledger; it does not connect to Testnet or Mainnet or make RPC calls.
 - **Clock & sequence control**: Uses in-memory mock ledger state via `env.ledger()` with deterministic timestamp and sequence warping.
 
 ## Known considerations
@@ -14,6 +21,23 @@
 - **Monotonic progression**: Advance ledger sequences and timestamps forward; warping backward can invalidate TTL or time-lock assumptions.
 - **Offline deterministic state**: All ledger time and sequence changes run in-memory with zero network RPC calls.
 - **TTL interaction**: Advancing the ledger sequence also ages persistent and temporary storage entries—pair with `ttl` checks when testing expiration.
+
+## Common pitfalls
+
+- **Expecting a CLI ledger command:** The `soroban-testkit` CLI runs
+  `coverage`, `limits`, and `audit`. Ledger time is controlled through
+  the Rust `TestEnv` API in tests, not a CLI subcommand.
+- **Confusing time with sequence:** `advance(Duration)` applies whole
+  seconds only. `advance_ledgers(n)` moves time by `n * interval`,
+  while time advances add `ceil(seconds / interval)` ledgers (the default
+  interval is 5 seconds). Do not assume one second means one ledger.
+- **Warping backwards or jumping too far:** `warp_to` rejects a timestamp
+  earlier than `now()`; large jumps can overflow timestamp/sequence
+  arithmetic. Use `try_warp_to` or `try_advance*` to handle
+  `TestkitError::Misuse` without a panic. Failed jumps do not move the clock.
+- **Forgetting TTL and reset semantics:** Advancing sequences can expire
+  storage entries. Validate their TTL after a jump; `clone_config()` and
+  `reset()` preserve configuration, not the current clock or contracts.
 
 ## Troubleshooting FAQ
 

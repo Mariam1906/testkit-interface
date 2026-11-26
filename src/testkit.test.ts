@@ -12,6 +12,7 @@ import {
   localFileGuides,
   quoteShellArg,
   summarizeConfiguration,
+  validateConfiguration,
   type CommandOptions,
 } from "./testkit";
 
@@ -62,6 +63,146 @@ describe("buildCommand", () => {
   });
 });
 
+// #21 — quote values containing tabs and line breaks, not just spaces
+describe("buildCommand quoting values with tabs and line breaks (#21)", () => {
+  const withOptions = (overrides: Partial<CommandOptions>): CommandOptions => ({
+    command: "coverage",
+    path: ".",
+    format: "html",
+    open: false,
+    fn: "",
+    ramp: "",
+    strict: false,
+    ...overrides,
+  });
+
+  it("quotes a coverage path containing a tab", () => {
+    expect(buildCommand(withOptions({ path: "./my\tcontract" })))
+      .toBe('soroban-testkit coverage "./my\tcontract" --format html');
+  });
+
+  it("quotes a coverage path containing a line break", () => {
+    expect(buildCommand(withOptions({ path: "./my\ncontract" })))
+      .toBe('soroban-testkit coverage "./my\ncontract" --format html');
+  });
+
+  it("quotes an audit path containing a carriage return", () => {
+    expect(buildCommand(withOptions({ command: "audit", path: "./a\rb" })))
+      .toBe('soroban-testkit audit "./a\rb"');
+  });
+
+  it("quotes a limits --contract path containing a tab and line break", () => {
+    expect(
+      buildCommand(
+        withOptions({
+          command: "limits",
+          path: "./a\tb\nc.wasm",
+          fn: "batch_payout",
+          ramp: "recipients",
+        }),
+      ),
+    ).toBe('soroban-testkit limits --contract "./a\tb\nc.wasm" --fn batch_payout --ramp recipients');
+  });
+
+  it("keeps values without whitespace unquoted", () => {
+    expect(buildCommand(withOptions({ path: "./contracts/escrow" })))
+      .toBe("soroban-testkit coverage ./contracts/escrow --format html");
+  });
+
+  it("preserves the quoting in multi-line and commented formats", () => {
+    const limits = withOptions({
+      command: "limits",
+      path: "./a\tb.wasm",
+      fn: "batch_payout",
+      ramp: "recipients",
+    });
+
+    expect(formatCommandLine(limits, true)).toContain('--contract "./a\tb.wasm"');
+    expect(formatCommandWithComments(limits)).toContain('"./a\tb.wasm"');
+  });
+});
+
+// #22 — a path made up only of whitespace behaves the same as an empty path
+describe("Whitespace-only project paths (#22)", () => {
+  const withOptions = (overrides: Partial<CommandOptions>): CommandOptions => ({
+    command: "coverage",
+    path: "   ",
+    format: "html",
+    open: false,
+    fn: "",
+    ramp: "",
+    strict: false,
+    ...overrides,
+  });
+
+  it("omits a whitespace-only coverage path like an empty one", () => {
+    expect(buildCommand(withOptions({ path: "" })))
+      .toBe("soroban-testkit coverage --format html");
+    expect(buildCommand(withOptions({ path: "   " })))
+      .toBe("soroban-testkit coverage --format html");
+  });
+
+  it("falls back to the default contract for a whitespace-only limits path", () => {
+    expect(buildCommand(withOptions({ command: "limits", path: "\t \n" })))
+      .toBe("soroban-testkit limits --contract target/wasm32v1-none/release/contract.wasm --fn batch_payout --ramp recipients");
+  });
+
+  it("falls back to the default source dir for a whitespace-only audit path", () => {
+    expect(buildCommand(withOptions({ command: "audit", path: "   " })))
+      .toBe("soroban-testkit audit ./src");
+  });
+
+  it("treats a whitespace-only path as omitted in the summary", () => {
+    expect(summarizeConfiguration(withOptions({ path: "   " }))[0])
+      .toEqual({ label: "Project or contract path", value: "(omitted)" });
+    expect(summarizeConfiguration(withOptions({ command: "limits", path: "   " }))[0])
+      .toEqual({ label: "Contract artifact", value: "target/wasm32v1-none/release/contract.wasm (default)" });
+    expect(summarizeConfiguration(withOptions({ command: "audit", path: "   " }))[0])
+      .toEqual({ label: "Project path", value: "./src (default)" });
+  });
+
+  it("marks the default as applied for a whitespace-only path", () => {
+    expect(effectiveDefaults(withOptions({ command: "limits", path: "   " }))[0])
+      .toMatchObject({ value: "target/wasm32v1-none/release/contract.wasm", applied: true });
+    expect(effectiveDefaults(withOptions({ command: "audit", path: "   " }))[0])
+      .toMatchObject({ value: "./src", applied: true });
+  });
+
+  it("reads a whitespace-only path as empty in the comparison", () => {
+    const row = compareConfigurations(
+      withOptions({ path: "   " }),
+      withOptions({ path: "./contracts" }),
+    ).find((entry) => entry.key === "path");
+    expect(row?.a).toBe("(empty)");
+    expect(row?.b).toBe("./contracts");
+  });
+
+  it("substitutes the default script variables for a whitespace-only path", () => {
+    expect(formatCommandAsScript(withOptions({ path: "   " })))
+      .toContain('PROJECT_PATH="."');
+    expect(formatCommandAsScript(withOptions({ command: "limits", path: "   " })))
+      .toContain('CONTRACT="target/wasm32v1-none/release/contract.wasm"');
+    expect(formatCommandAsScript(withOptions({ command: "audit", path: "   " })))
+      .toContain('SOURCE_PATH="./src"');
+  });
+
+  it("warns about a whitespace-only path during validation", () => {
+    const result = validateConfiguration({
+      options: { command: "coverage", path: "   ", format: "html", open: false, fn: "", ramp: "", strict: false },
+    });
+    expect(result.warnings).toContain("path is not set; default values will be used");
+  });
+
+  it("still uses a real path in every workflow", () => {
+    expect(buildCommand(withOptions({ path: "./contracts/escrow" })))
+      .toBe("soroban-testkit coverage ./contracts/escrow --format html");
+    expect(buildCommand(withOptions({ command: "limits", path: "./a.wasm" })))
+      .toBe("soroban-testkit limits --contract ./a.wasm --fn batch_payout --ramp recipients");
+    expect(buildCommand(withOptions({ command: "audit", path: "./src" })))
+      .toBe("soroban-testkit audit ./src");
+  });
+});
+
 describe("formatCommandLine", () => {
   it("returns single-line identical to buildCommand when multiline is false", () => {
     const options = {
@@ -94,8 +235,7 @@ describe("formatCommandLine", () => {
       [
         "soroban-testkit coverage \\",
         "  ./contracts/escrow \\",
-        "  --format lcov \\",
-        "  --open",
+        "  --format lcov",
       ].join("\n"),
     );
   });
@@ -591,6 +731,7 @@ describe("formatCommandAsScript", () => {
   });
 });
 
+ fix/command-shell-mobile-tabs-copy-12-15
 // Regression coverage for issue #12: each path stays a single literal argument.
 describe("shell command argument escaping (#12)", () => {
   const hostilePaths = [
@@ -653,5 +794,38 @@ describe("shell command argument escaping (#12)", () => {
       ], { encoding: "utf8" });
       expect(result).toBe(path);
     }
+
+// Issue #30: paths that begin with a command-line option prefix
+describe("paths beginning with an option prefix", () => {
+  const base: CommandOptions = { command: "coverage", path: "", format: "html", open: false, fn: "", ramp: "", strict: false };
+
+  it("anchors a dash-prefixed coverage path so it is not parsed as a flag", () => {
+    expect(buildCommand({ ...base, path: "--format" }))
+      .toBe("soroban-testkit coverage ./--format --format html");
+  });
+
+  it("anchors a dash-prefixed limits --contract path", () => {
+    expect(buildCommand({ ...base, command: "limits", path: "-contract.wasm" }))
+      .toBe("soroban-testkit limits --contract ./-contract.wasm --fn batch_payout --ramp recipients");
+  });
+
+  it("anchors a dash-prefixed audit path and keeps quoting for spaces", () => {
+    expect(buildCommand({ ...base, command: "audit", path: "-my src", strict: true }))
+      .toBe('soroban-testkit audit "./-my src" --strict');
+  });
+
+  it("anchors the path in multiline, commented, and script output", () => {
+    const options = { ...base, command: "audit" as const, path: "-src" };
+    expect(formatCommandLine(options, true)).toContain("  ./-src");
+    expect(formatCommandWithComments(options)).toContain("  ./-src  # Contract source directory");
+    expect(formatCommandAsScript(options)).toContain('SOURCE_PATH="./-src"');
+  });
+
+  it("leaves paths without a leading dash unchanged", () => {
+    expect(buildCommand({ ...base, path: "./my-contract" }))
+      .toBe("soroban-testkit coverage ./my-contract --format html");
+    expect(buildCommand({ ...base, command: "audit", path: "/abs/-src" }))
+      .toBe("soroban-testkit audit /abs/-src");
+ main
   });
 });

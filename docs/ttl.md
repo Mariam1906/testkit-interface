@@ -6,15 +6,17 @@
 
 The ttl module provides the following key functions:
 
-- **`ttl_of(&env, storage_kind, key)`** — Reads the current TTL (in ledger entries) for a storage entry. Returns the remaining lifetime before expiry.
-- **`assert_bumps_ttl(&env, storage_kind, key, closure)`** — Asserts that the closure extends the TTL for the given entry. Fails if the TTL does not increase.
-- **`assert_survives_expiry(storage_kind, closure)`** — Asserts that the closure handles expired data gracefully (no panics or unwraps on missing values).
-- **`expire_all()`** — Advances the ledger past `max_entry_ttl`, expiring all storage entries of all kinds.
+- **`env.ttl_of(&contract, storage_kind, key)`** — Reads the current TTL (in ledger entries) for a storage entry. Panics if the entry is missing or already expired.
+- **`env.assert_bumps_ttl(&contract, storage_kind, key, closure)`** — Asserts that the closure extends the TTL for the given entry. Fails if the TTL does not increase.
+- **`env.assert_survives_expiry(storage_kind, closure)`** — Advances the ledger past `max_entry_ttl` first, then asserts that the closure handles expired data gracefully (no panics or unwraps on missing values).
+- **`env.expire(storage_kind)`** — Advances the ledger one entry past the environment's current `max_entry_ttl`, expiring all storage entries of all kinds. The kind argument documents intent but does not filter expiry.
 
 **Storage kinds:**
 - `StorageKind::Persistent` — Long-lived contract state (default TTL: 4,294,967 ledger entries, ~6 months).
 - `StorageKind::Temporary` — Short-lived state requiring frequent TTL extension (default TTL: 2,629,743 ledger entries, ~100 days).
 - `StorageKind::Instance` — Single TTL per contract, ignores specific keys.
+
+TTL values come from the test ledger configuration rather than hardcoded constants in the module. The figures above are rules of thumb; read the actual value with `ttl_of` before asserting on it.
 
 ## Runnable example
 
@@ -61,7 +63,7 @@ fn test_contract_handles_expiry_gracefully() {
 
 ## Common failure modes
 
-- **`ttl_of` panics or returns None** — The entry does not exist or has already expired. Write it first, and always read the TTL before calling `expire_all()` or advancing the ledger too far. Check that the storage kind matches where the data was written.
+- **`ttl_of` panics** — The entry does not exist or has already expired (it returns a `u32`, never `None`). Write it first, and always read the TTL before calling `expire()` or advancing the ledger too far. Check that the storage kind matches where the data was written.
 
 - **`expected the call to extend the TTL beyond X, but it was Y afterward`** — The closure did not call a function that extends the TTL (like `extend_ttl` or a contract function that accesses the entry). Alternatively, the entry's TTL was already above the threshold, so nothing changed. Verify that your contract client is calling the right method.
 
@@ -69,6 +71,14 @@ fn test_contract_handles_expiry_gracefully() {
 
 - **Different TTL values for `Persistent` vs. `Temporary`** — `StorageKind::Persistent` has a much longer default TTL (~6 months) than `Temporary` (~100 days). Tests for temporary storage will expire much faster. Use the correct `StorageKind` in your test.
 
-- **`expire_all()` ignores the storage kind** — This function advances past the network's `max_entry_ttl`, which expires every entry of every kind. Use it to test expiry of all storage types at once. The kind argument in `assert_survives_expiry` only documents intent; it does not filter expiry.
+- **`expire(kind)` ignores the storage kind** — It reads `max_entry_ttl` from the environment's current ledger info at runtime and advances one ledger past it, which expires every entry of every kind. Use it to test expiry of all storage types at once. The kind argument only documents intent; it does not filter expiry.
 
 - **Key argument ignored for `StorageKind::Instance`** — Instance storage has one TTL per contract, not one per key. Any key argument returns the same TTL. If you need per-key lifetimes, use `StorageKind::Persistent` or `Temporary` instead.
+
+## Common pitfalls
+
+- **TTLs are ledger counts, not seconds.** Advancing 10 ledgers lowers `ttl_of` by exactly 10. Convert time-based expectations to ledgers before asserting.
+- **A read is not a bump.** `assert_bumps_ttl` fails when the closure only reads an entry, or when the entry was already at the network's `max_entry_ttl` so there was no headroom to extend. Call the contract path that actually extends the TTL.
+- **Do not pre-expire for `assert_survives_expiry`.** The helper calls `expire(kind)` itself and then runs the closure; advancing first gives a false pass on an already-empty store.
+- **`expire(kind)` expires every kind.** Pass whichever `StorageKind` documents your intent, but expect persistent, temporary, and instance entries to be gone afterwards. Check individual headroom with `ttl_of` first if it matters.
+- **Register and write before reading.** `ttl_of` panics for a missing or expired entry. Inside expiry closures, use `get(...).unwrap_or(default)`, `has(key)`, or `Option` handling instead of `.unwrap()`.
